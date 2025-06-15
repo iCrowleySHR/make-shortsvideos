@@ -5,16 +5,18 @@ import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk, colorchooser
 import subprocess
-
-# Configurações padrão
-MODELO_WHISPER = "small"
-FONTE_PADRAO = "Arial"
-TAMANHO_PADRAO = 8
-COR_PADRAO = "#DAA520"  # Amarelo mostarda
-POSICAO_VERTICAL_PADRAO = 20  # Porcentagem (0=topo, 100=base)
-ESPACAMENTO_PADRAO = 0.2  # Fator de espaçamento entre legendas
+from pathlib import Path
 
 class LegendadorApp:
+    # Configurações padrão
+    VIDEO_EXTENSIONS = ['mp4', 'mkv', 'avi', 'mov', 'flv', 'wmv', 'm4v', 'webm', 'mpg', 'mpeg', 'ts', 'ogv', '3gp']
+    MODELO_WHISPER = "small"
+    FONTE_PADRAO = "Arial"
+    TAMANHO_PADRAO = 8
+    COR_PADRAO = "#DAA520"  # Amarelo mostarda
+    POSICAO_VERTICAL_PADRAO = 20  # Porcentagem (0=topo, 100=base)
+    ESPACAMENTO_PADRAO = 0.2  # Fator de espaçamento entre legendas
+
     def __init__(self, root):
         self.root = root
         self.root.title("Legendador Automático")
@@ -22,12 +24,12 @@ class LegendadorApp:
         self.root.configure(bg="#f0f0f0")
 
         # Variáveis de configuração
-        self.fonte_legenda = tk.StringVar(value=FONTE_PADRAO)
-        self.tamanho_legenda = tk.IntVar(value=TAMANHO_PADRAO)
-        self.cor_legenda = tk.StringVar(value=COR_PADRAO)
-        self.posicao_vertical = tk.IntVar(value=POSICAO_VERTICAL_PADRAO)
-        self.espacamento_legenda = tk.DoubleVar(value=ESPACAMENTO_PADRAO)
-        self.modelo_whisper = tk.StringVar(value=MODELO_WHISPER)
+        self.fonte_legenda = tk.StringVar(value=self.FONTE_PADRAO)
+        self.tamanho_legenda = tk.IntVar(value=self.TAMANHO_PADRAO)
+        self.cor_legenda = tk.StringVar(value=self.COR_PADRAO)
+        self.posicao_vertical = tk.IntVar(value=self.POSICAO_VERTICAL_PADRAO)
+        self.espacamento_legenda = tk.DoubleVar(value=self.ESPACAMENTO_PADRAO)
+        self.modelo_whisper = tk.StringVar(value=self.MODELO_WHISPER)
 
         self.criar_interface()
 
@@ -53,7 +55,7 @@ class LegendadorApp:
         # Linha 2 - Posição e Espaçamento
         tk.Label(config_frame, text="Posição Vertical (%):", bg="#f0f0f0").grid(row=1, column=0, sticky=tk.W)
         ttk.Scale(config_frame, from_=0, to=100, variable=self.posicao_vertical, command=self.atualizar_posicao).grid(row=1, column=1, sticky=tk.W, padx=5)
-        self.posicao_label = tk.Label(config_frame, text="90%", bg="#f0f0f0")
+        self.posicao_label = tk.Label(config_frame, text=f"{self.POSICAO_VERTICAL_PADRAO}%", bg="#f0f0f0")
         self.posicao_label.grid(row=1, column=2, sticky=tk.W)
 
         tk.Label(config_frame, text="Espaçamento:", bg="#f0f0f0").grid(row=1, column=3, sticky=tk.W)
@@ -102,7 +104,8 @@ class LegendadorApp:
             self.cor_btn.config(bg=cor[1])
 
     def log(self, mensagem):
-        self.log_text.insert(tk.END, mensagem + "\n")
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self.log_text.insert(tk.END, f"[{timestamp}] {mensagem}\n")
         self.log_text.see(tk.END)
         self.root.update_idletasks()
 
@@ -180,8 +183,16 @@ class LegendadorApp:
             os.remove(srt_path)
             return True
             
+        except subprocess.CalledProcessError as e:
+            self.log(f"Erro no FFmpeg: {e.stderr.decode('utf-8')}")
+            if os.path.exists(srt_path):
+                try:
+                    os.remove(srt_path)
+                except:
+                    pass
+            return False
         except Exception as e:
-            self.log(f"Erro: {str(e)}")
+            self.log(f"Erro inesperado: {str(e)}")
             if os.path.exists(srt_path):
                 try:
                     os.remove(srt_path)
@@ -211,17 +222,25 @@ class LegendadorApp:
         
         self.log("Procurando vídeos...")
         
-        videos = [f for f in os.listdir(pasta) if f.lower().endswith('.mp4')]
+        videos = []
+        for f in os.listdir(pasta):
+            file_path = os.path.join(pasta, f)
+            if os.path.isfile(file_path):
+                ext = Path(f).suffix[1:].lower()  # Remove o ponto e converte para minúsculas
+                if ext in self.VIDEO_EXTENSIONS:
+                    videos.append(f)
         
         if not videos:
-            messagebox.showwarning("Aviso", "Nenhum vídeo MP4 encontrado na pasta.")
+            messagebox.showwarning("Aviso", 
+                f"Nenhum vídeo encontrado na pasta. Formatos suportados: {', '.join(self.VIDEO_EXTENSIONS)}")
             return
         
         self.log(f"Encontrados {len(videos)} vídeos para processar.")
         
         for video in videos:
             video_path = os.path.join(pasta, video)
-            output_path = os.path.join(output_dir, video)
+            output_name = f"{Path(video).stem}_legendado{Path(video).suffix}"
+            output_path = os.path.join(output_dir, output_name)
             
             if os.path.exists(output_path):
                 self.log(f"Pulando {video} (já existe versão legendada)")
