@@ -1,12 +1,24 @@
 import os
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 import unicodedata
 import re
+from datetime import datetime
 
 VIDEO_EXTENSIONS = ['mp4', 'mkv', 'avi', 'mov', 'flv', 'wmv', 'm4v', 'webm', 'mpg', 'mpeg', 'ts', 'ogv', '3gp']
+
+def check_ffmpeg():
+    try:
+        subprocess.run(["ffmpeg", "-version"], 
+                      check=True, 
+                      stdout=subprocess.PIPE, 
+                      stderr=subprocess.PIPE)
+        return True
+    except:
+        return False
 
 def sanitize_filename(name):
     substitutions = {
@@ -17,9 +29,7 @@ def sanitize_filename(name):
         'é': 'e', 'ê': 'e', 'í': 'i',
         'ó': 'o', 'ô': 'o', 'õ': 'o',
         'ú': 'u', 'ü': 'u', 'ñ': 'n',
-        '｜': '',  # FULLWIDTH VERTICAL LINE
-        '¦': '',   # BROKEN BAR
-        '|': '',   # ASCII pipe
+        '｜': '', '¦': '', '|': '',
         '#': '', ':': '', '"': '', '\'': '',
         '“': '', '”': '', '<': '', '>': '',
         '/': '', '\\': '', '?': '', '|': '', '＂': ''
@@ -29,13 +39,13 @@ def sanitize_filename(name):
     name = unicodedata.normalize('NFKD', name)
     name = name.encode('ASCII', 'ignore').decode('ASCII')
     name = re.sub(r'_+', '_', name).strip('_')
-    return name
+    return name[:200]  # Limita o tamanho do nome
 
 def sanitize_filename_bat_old_style(name):
     name = name.replace(' ', '_')
     for ch in ['#', ':', '"', '\'', '“', '”', '<', '>', '/', '\\', '?', '|', '＂']:
         name = name.replace(ch, '')
-    return name
+    return name[:200]
 
 def sanitize_filename_bat_new_style(name):
     substitutions = {
@@ -56,8 +66,7 @@ def sanitize_filename_bat_new_style(name):
     name = unicodedata.normalize('NFKD', name)
     name = name.encode('ASCII', 'ignore').decode('ASCII')
     name = re.sub(r'_+', '_', name).strip('_')
-    return name
-
+    return name[:200]
 
 class VideoConverterApp:
     def __init__(self, root):
@@ -69,51 +78,101 @@ class VideoConverterApp:
         self.create_widgets()
         self.video_list = []
         self.stop_flag = False
+        self.current_process = None
 
     def create_widgets(self):
-        btn = tk.Button(self.root, text="Selecionar Pasta com Vídeos", font=("Arial", 14), bg="#4CAF50", fg="white",
-                        command=self.select_folder)
-        btn.pack(pady=15)
+        # Frame principal
+        main_frame = tk.Frame(self.root, bg="#f0f0f0")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.progress_total = ttk.Progressbar(self.root, length=700, mode='determinate')
-        self.progress_total.pack(pady=10)
-        self.label_total = tk.Label(self.root, text="Progresso geral: 0/0", bg="#f0f0f0")
-        self.label_total.pack()
+        # Botão de seleção
+        btn_frame = tk.Frame(main_frame, bg="#f0f0f0")
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        self.btn_select = tk.Button(btn_frame, text="Selecionar Pasta com Vídeos", 
+                                  font=("Arial", 14), bg="#4CAF50", fg="white",
+                                  command=self.select_folder)
+        self.btn_select.pack(side=tk.LEFT, expand=True)
 
-        self.progress_current = ttk.Progressbar(self.root, length=700, mode='determinate')
-        self.progress_current.pack(pady=10)
-        self.label_current = tk.Label(self.root, text="Progresso do vídeo atual: 0%", bg="#f0f0f0")
-        self.label_current.pack()
+        self.btn_stop = tk.Button(btn_frame, text="Parar Conversão", 
+                                 font=("Arial", 14), bg="#f44336", fg="white",
+                                 command=self.stop_conversion, state=tk.DISABLED)
+        self.btn_stop.pack(side=tk.LEFT, expand=True, padx=10)
 
-        log_frame = tk.LabelFrame(self.root, text="Log de Processamento", bg="#f0f0f0")
-        log_frame.pack(padx=10, pady=15, fill=tk.BOTH, expand=True)
-        self.log_text = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10), bg="black", fg="white", wrap=tk.WORD)
+        # Barras de progresso
+        progress_frame = tk.Frame(main_frame, bg="#f0f0f0")
+        progress_frame.pack(fill=tk.X, pady=10)
+
+        self.label_total = tk.Label(progress_frame, text="Progresso geral: 0/0", bg="#f0f0f0")
+        self.label_total.pack(anchor=tk.W)
+
+        self.progress_total = ttk.Progressbar(progress_frame, length=700, mode='determinate')
+        self.progress_total.pack(fill=tk.X, pady=5)
+
+        self.label_current = tk.Label(progress_frame, text="Progresso do vídeo atual: 0%", bg="#f0f0f0")
+        self.label_current.pack(anchor=tk.W)
+
+        self.progress_current = ttk.Progressbar(progress_frame, length=700, mode='determinate')
+        self.progress_current.pack(fill=tk.X, pady=5)
+
+        # Área de log
+        log_frame = tk.LabelFrame(main_frame, text="Log de Processamento", bg="#f0f0f0")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        self.log_text = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10), 
+                                                bg="black", fg="white", wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
     def log(self, message):
-        self.log_text.insert(tk.END, message + "\n")
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
         self.log_text.see(tk.END)
         self.root.update_idletasks()
+
+    def stop_conversion(self):
+        self.stop_flag = True
+        if self.current_process:
+            self.current_process.terminate()
+        self.btn_stop.config(state=tk.DISABLED)
+        self.log("Conversão interrompida pelo usuário")
 
     def select_folder(self):
         folder = filedialog.askdirectory()
         if not folder:
             return
+        
+        self.stop_flag = False
+        self.btn_select.config(state=tk.DISABLED)
+        self.btn_stop.config(state=tk.NORMAL)
+        
         self.log(f"Pasta selecionada: {folder}")
 
         self.converted_dir = os.path.join(folder, "converted")
-        os.makedirs(self.converted_dir, exist_ok=True)
-        self.log(f"Pasta de saída criada: {self.converted_dir}")
+        if os.path.exists(self.converted_dir):
+            self.log(f"Pasta de saída já existe: {self.converted_dir}")
+        else:
+            os.makedirs(self.converted_dir)
+            self.log(f"Pasta de saída criada: {self.converted_dir}")
 
-        all_videos = [f for f in os.listdir(folder) if f.split('.')[-1].lower() in VIDEO_EXTENSIONS]
+        # Lista todos os arquivos de vídeo
+        all_videos = []
+        for f in os.listdir(folder):
+            if os.path.isfile(os.path.join(folder, f)):
+                ext = f.split('.')[-1].lower() if '.' in f else ''
+                if ext in VIDEO_EXTENSIONS:
+                    all_videos.append(f)
+
         if not all_videos:
             messagebox.showwarning("Aviso", "Nenhum vídeo encontrado na pasta.")
+            self.btn_select.config(state=tk.NORMAL)
+            self.btn_stop.config(state=tk.DISABLED)
             return
 
-        # Filtra só vídeos NÃO convertidos
+        # Filtra vídeos não convertidos
         self.video_list = []
         for video in all_videos:
             base_name, ext = os.path.splitext(video)
+            ext = ext.lower()
             if not self.already_converted(base_name, ext):
                 self.video_list.append(video)
             else:
@@ -121,6 +180,8 @@ class VideoConverterApp:
 
         if not self.video_list:
             messagebox.showinfo("Informação", "Todos os vídeos já foram convertidos.")
+            self.btn_select.config(state=tk.NORMAL)
+            self.btn_stop.config(state=tk.DISABLED)
             return
 
         self.log(f"Total de vídeos para converter: {len(self.video_list)}")
@@ -135,75 +196,122 @@ class VideoConverterApp:
         threading.Thread(target=self.process_videos, daemon=True).start()
 
     def already_converted(self, base_name, ext):
-        sanitized_current = sanitize_filename(base_name)
-        path_current = os.path.join(self.converted_dir, f"{sanitized_current}_vertical{ext}")
-        if os.path.exists(path_current):
-            return True
-
-        sanitized_bat_old = sanitize_filename_bat_old_style(base_name)
-        path_bat_old = os.path.join(self.converted_dir, f"{sanitized_bat_old}_vertical{ext}")
-        if os.path.exists(path_bat_old):
-            return True
-
-        sanitized_bat_new = sanitize_filename_bat_new_style(base_name)
-        path_bat_new = os.path.join(self.converted_dir, f"{sanitized_bat_new}_vertical{ext}")
-        if os.path.exists(path_bat_new):
-            return True
-
+        name_variations = {
+            'current': sanitize_filename(base_name),
+            'bat_old': sanitize_filename_bat_old_style(base_name),
+            'bat_new': sanitize_filename_bat_new_style(base_name),
+            'original': base_name
+        }
+        
+        for variation in name_variations.values():
+            output_path = os.path.join(self.converted_dir, f"{variation}_vertical{ext}")
+            if os.path.exists(output_path):
+                return True
+        
         return False
 
     def process_videos(self):
         for i, video in enumerate(self.video_list, start=1):
             if self.stop_flag:
                 break
+                
             self.label_total.config(text=f"Progresso geral: {i-1}/{len(self.video_list)}")
             input_path = os.path.join(self.folder, video)
             base_name, ext = os.path.splitext(video)
+            ext = ext.lower()
 
             sanitized_name = sanitize_filename(base_name)
             output_path = os.path.join(self.converted_dir, f"{sanitized_name}_vertical{ext}")
 
-            self.log(f"\nConvertendo: {video} → {os.path.basename(output_path)}")
+            self.log(f"\nIniciando conversão: {video} → {os.path.basename(output_path)}")
             success = self.convert_video(input_path, output_path)
+            
             if success:
-                self.log(f"Concluído: {video}")
+                self.log(f"Conversão concluída: {video}")
             else:
                 self.log(f"Falha ao converter: {video}")
+                
             self.progress_total['value'] = i
             self.label_total.config(text=f"Progresso geral: {i}/{len(self.video_list)}")
+        
         self.label_current.config(text="Progresso do vídeo atual: 100%")
         self.progress_current['value'] = 0
-        self.log("\nConversão concluída!")
-        messagebox.showinfo("Finalizado", f"Todos os vídeos foram processados.\nSaída: {self.converted_dir}")
+        self.btn_select.config(state=tk.NORMAL)
+        self.btn_stop.config(state=tk.DISABLED)
+        
+        if not self.stop_flag:
+            self.log("\nConversão concluída com sucesso!")
+            messagebox.showinfo("Finalizado", f"Todos os vídeos foram processados.\nSaída: {self.converted_dir}")
+        else:
+            self.log("\nProcesso interrompido pelo usuário")
+
+    def update_progress(self, current_time, total_duration):
+        try:
+            def time_to_seconds(t):
+                h, m, s = t.split(':')
+                return int(h)*3600 + int(m)*60 + float(s)
+            
+            current = time_to_seconds(current_time)
+            total = time_to_seconds(total_duration)
+            
+            percent = (current / total) * 100
+            self.progress_current['value'] = percent
+            self.label_current.config(text=f"Progresso do vídeo atual: {int(percent)}%")
+            self.root.update_idletasks()
+        except:
+            pass
 
     def convert_video(self, input_path, output_path):
-        command = [
-            "ffmpeg",
-            "-y",
-            "-i", input_path,
-            "-filter_complex",
-            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:5[bg];"
-            "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];"
-            "[bg][fg]overlay=(W-w)/2:(H-h)/2,crop=1080:1920",
-            "-c:a", "copy",
-            "-movflags", "+faststart",
-            "-preset", "fast",
-            "-crf", "23",
-            output_path
-        ]
-
         try:
-            process = subprocess.Popen(command, stderr=subprocess.PIPE, universal_newlines=True)
-            for line in process.stderr:
-                # Você pode adicionar lógica para progresso do vídeo aqui
-                pass
-            process.wait()
-            return process.returncode == 0
+            if not os.path.exists(input_path):
+                self.log(f"Erro: Arquivo de entrada não encontrado: {input_path}")
+                return False
+                
+            command = [
+                "ffmpeg",
+                "-y",
+                "-i", input_path,
+                "-filter_complex",
+                "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:5[bg];"
+                "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];"
+                "[bg][fg]overlay=(W-w)/2:(H-h)/2,crop=1080:1920",
+                "-c:a", "copy",
+                "-movflags", "+faststart",
+                "-preset", "fast",
+                "-crf", "23",
+                output_path
+            ]
+
+            self.current_process = subprocess.Popen(command, stderr=subprocess.PIPE, 
+                                                 universal_newlines=True, bufsize=1)
+            
+            duration = None
+            for line in self.current_process.stderr:
+                if self.stop_flag:
+                    self.current_process.terminate()
+                    return False
+                    
+                if "Duration:" in line:
+                    duration = line.split("Duration:")[1].split(",")[0].strip()
+                elif "time=" in line:
+                    time = line.split("time=")[1].split(" ")[0]
+                    if duration:
+                        self.update_progress(time, duration)
+            
+            self.current_process.wait()
+            return self.current_process.returncode == 0
+            
         except Exception as e:
-            self.log(f"Erro na conversão: {e}")
+            self.log(f"Erro na conversão: {str(e)}")
             return False
+        finally:
+            self.current_process = None
 
 if __name__ == "__main__":
+    if not check_ffmpeg():
+        messagebox.showerror("Erro", "FFmpeg não encontrado no sistema!")
+        sys.exit(1)
+        
     root = tk.Tk()
     app = VideoConverterApp(root)
     root.mainloop()
