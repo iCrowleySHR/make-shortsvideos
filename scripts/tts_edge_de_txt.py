@@ -209,12 +209,13 @@ class EdgeTTSApp:
                             self.log(f"⚠️ Arquivo vazio: {filename}")
                             continue
 
-                        ssml_text = f'<speak><prosody rate="{speed}">{text}</prosody></speak>'
-
-                        self.log(f"🔊 Convertendo: {filename}")
-                        communicate = edge_tts.Communicate(ssml_text, voice=voice_short)
+                        # Formatação correta sem o parâmetro ssml
+                        communicate = edge_tts.Communicate(text, voice=voice_short, rate=speed)
                         await communicate.save(output)
                         self.log(f"✅ Finalizado: {filename}")
+
+                    except Exception as e:
+                        self.log(f"❌ Erro em {filename}: {str(e)}")
 
                     except Exception as e:
                         self.log(f"❌ Erro em {filename}: {str(e)}")
