@@ -3,3 +3,5 @@ srt
 yt-dlp
 moviepy
 tk
+edge-tts
+gTTS
