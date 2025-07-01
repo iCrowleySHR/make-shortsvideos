@@ -1,116 +1,127 @@
 import os
 import random
-from moviepy import VideoFileClip, AudioFileClip
-from moviepy import crop
+import threading
+from pathlib import Path
+from moviepy.editor import VideoFileClip, AudioFileClip
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
-from pathlib import Path
 
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov']
-AUDIO_EXTENSIONS = ['.mp3', '.wav', '.aac', '.ogg', '.m4a'] 
+AUDIO_EXTENSIONS = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
 
-class VideoAudioMixerApp:
+class ShortsMakerSimples:
     def __init__(self, master):
         self.master = master
-        self.master.title("Shorts Maker - Vídeo + Áudio")
-        self.master.geometry("600x400")
+        self.master.title("Shorts Maker Simples")
+        self.master.geometry("700x500")
 
-        self.audio_folder = ''
-        self.video_folder = ''
+        self.audio_folder = ""
+        self.video_folder = ""
 
+        # Interface
         self.create_widgets()
 
     def create_widgets(self):
-        tk.Button(self.master, text="Selecionar Pasta de Áudios", command=self.select_audio_folder).pack(pady=10)
-        tk.Button(self.master, text="Selecionar Pasta de Vídeos", command=self.select_video_folder).pack(pady=10)
-        tk.Button(self.master, text="Iniciar Criação dos Shorts", command=self.process).pack(pady=20)
+        btn_audio = tk.Button(self.master, text="Selecionar Pasta de Áudios", command=self.select_audio_folder)
+        btn_audio.pack(pady=5)
 
-        self.log_box = scrolledtext.ScrolledText(self.master, wrap=tk.WORD, width=70, height=15)
-        self.log_box.pack(padx=10, pady=10)
+        btn_video = tk.Button(self.master, text="Selecionar Pasta de Vídeos", command=self.select_video_folder)
+        btn_video.pack(pady=5)
 
-    def log(self, text):
-        self.log_box.insert(tk.END, text + "\n")
-        self.log_box.see(tk.END)
-        self.master.update()
+        btn_generate = tk.Button(self.master, text="GERAR SHORTS EM LOTE", bg="green", fg="white", command=self.process_batch)
+        btn_generate.pack(pady=10)
+
+        self.log_area = scrolledtext.ScrolledText(self.master, wrap=tk.WORD, height=20)
+        self.log_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    def log(self, message):
+        self.log_area.insert(tk.END, message + "\n")
+        self.log_area.see(tk.END)
+        print(message)
 
     def select_audio_folder(self):
-        self.audio_folder = filedialog.askdirectory(title="Selecione a pasta de áudios")
-        self.log(f"Pasta de áudios selecionada: {self.audio_folder}")
+        path = filedialog.askdirectory()
+        if path:
+            self.audio_folder = path
+            self.log(f"📁 Pasta de áudios selecionada: {path}")
 
     def select_video_folder(self):
-        self.video_folder = filedialog.askdirectory(title="Selecione a pasta de vídeos")
-        self.log(f"Pasta de vídeos selecionada: {self.video_folder}")
+        path = filedialog.askdirectory()
+        if path:
+            self.video_folder = path
+            self.log(f"🎞️ Pasta de vídeos selecionada: {path}")
 
-    def process(self):
+    def process_batch(self):
         if not self.audio_folder or not self.video_folder:
-            messagebox.showerror("Erro", "Você deve selecionar ambas as pastas!")
+            messagebox.showerror("Erro", "Selecione as pastas de áudio e vídeo antes de começar.")
             return
 
-        audio_files = [os.path.join(self.audio_folder, f) for f in os.listdir(self.audio_folder) if Path(f).suffix.lower() in AUDIO_EXTENSIONS]
-        video_files = [os.path.join(self.video_folder, f) for f in os.listdir(self.video_folder) if Path(f).suffix.lower() in VIDEO_EXTENSIONS]
+        threading.Thread(target=self.generate_shorts, daemon=True).start()
+
+    def generate_shorts(self):
+        audio_files = [f for f in Path(self.audio_folder).glob("*") if f.suffix.lower() in AUDIO_EXTENSIONS]
+        video_files = [f for f in Path(self.video_folder).glob("*") if f.suffix.lower() in VIDEO_EXTENSIONS]
 
         if not audio_files or not video_files:
-            self.log("Nenhum arquivo de áudio ou vídeo encontrado.")
+            messagebox.showerror("Erro", "Não foram encontrados áudios ou vídeos válidos.")
             return
 
-        output_dir = os.path.join(self.audio_folder, "output")
-        os.makedirs(output_dir, exist_ok=True)
+        shorts_folder = Path(self.audio_folder) / "SHORTS_GERADOS"
+        shorts_folder.mkdir(exist_ok=True)
+
+        self.log(f"🔊 Áudios encontrados: {len(audio_files)}")
+        self.log(f"🎥 Vídeos encontrados: {len(video_files)}")
+        self.log("⏳ Processando... (isso pode demorar)")
 
         for audio_path in audio_files:
             try:
-                audio_clip = AudioFileClip(audio_path)
-                audio_duration = audio_clip.duration
-
                 video_path = random.choice(video_files)
-                video_clip = VideoFileClip(video_path)
+                audio_clip = AudioFileClip(str(audio_path))
+                video_clip = VideoFileClip(str(video_path))
 
-                if video_clip.duration <= audio_duration:
-                    start = 0
-                else:
-                    max_start = video_clip.duration - audio_duration
-                    start = random.uniform(0, max_start)
+                if video_clip.duration < 1 or audio_clip.duration < 1:
+                    raise Exception("Arquivo com duração inválida")
 
-                video_subclip = video_clip.subclip(start, start + audio_duration)
+                max_start = max(0, video_clip.duration - audio_clip.duration)
+                start_time = random.uniform(0, max_start)
+                end_time = start_time + audio_clip.duration
+                subclip = video_clip.subclip(start_time, end_time)
 
-                # Faz crop para 1080x1920 (centralizado)
-                w, h = video_subclip.size
-                target_w, target_h = 1080, 1920
+                # Redimensionar ou cortar o vídeo para 1080x1920 mantendo o centro
+                subclip = subclip.resize(height=1920)
+                if subclip.w > 1080:
+                    x_center = subclip.w / 2
+                    subclip = subclip.crop(x_center=x_center, width=1080)
+                elif subclip.w < 1080:
+                    subclip = subclip.resize(width=1080)
 
-                # Se vídeo for menor que 1080x1920 em alguma dimensão, avisa e pula crop (ou pode esticar)
-                if w < target_w or h < target_h:
-                    self.log(f"Vídeo {Path(video_path).name} tem resolução menor que 1080x1920, ignorando crop.")
-                    video_cropped = video_subclip.resize((target_w, target_h))  # opcional: redimensiona se quiser forçar
-                else:
-                    x_center = w // 2
-                    y_center = h // 2
+                final_clip = subclip.set_audio(audio_clip)
 
-                    x1 = max(0, x_center - target_w // 2)
-                    y1 = max(0, y_center - target_h // 2)
+                output_name = f"short_{audio_path.stem}.mp4"
+                output_path = shorts_folder / output_name
 
-                    if x1 + target_w > w:
-                        x1 = w - target_w
-                    if y1 + target_h > h:
-                        y1 = h - target_h
+                # Verifica se o short já foi gerado
+                if output_path.exists():
+                    self.log(f"⏭️ Pulado (já existe): {output_name}")
+                    continue
 
-                    video_cropped = crop(video_subclip, x1=x1, y1=y1, width=target_w, height=target_h)
+                final_clip.write_videofile(str(output_path), codec="libx264", audio_codec="aac", threads=4, verbose=False, logger=None)
 
-                final_video = video_cropped.set_audio(audio_clip)
+                self.log(f"✅ Gerado: {output_name}")
 
-                audio_name = Path(audio_path).stem
-                output_path = os.path.join(output_dir, f"{audio_name}_short.mp4")
-
-                self.log(f"Gerando vídeo: {output_path}")
-                final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", verbose=False, logger=None)
-
+                # Cleanup
                 audio_clip.close()
                 video_clip.close()
-                final_video.close()
-            except Exception as e:
-                self.log(f"Erro ao processar {audio_path}: {e}")
+                subclip.close()
+                final_clip.close()
 
-        self.log("✅ Todos os vídeos foram gerados.")
+            except Exception as e:
+                self.log(f"❌ Erro em {audio_path.name}: {str(e)}")
+
+        messagebox.showinfo("Concluído", "Todos os shorts foram gerados!")
+        self.log("✅ Finalizado com sucesso!")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = VideoAudioMixerApp(root)
+    app = ShortsMakerSimples(root)
     root.mainloop()
