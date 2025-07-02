@@ -1,7 +1,7 @@
 openai-whisper
 srt
 yt-dlp
-moviepy==1.0.3
+moviepy
 Pillow==9.5.0
 tk
 edge-tts
