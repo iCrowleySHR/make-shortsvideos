@@ -8,13 +8,17 @@ from tkinter import font as tkfont
 import subprocess
 from pathlib import Path
 import threading
+from moviepy.editor import VideoFileClip, CompositeVideoClip, TextClip
+from moviepy.config import change_settings
+
+change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.1-Q16\magick.exe"})
 
 class LegendadorApp:
     # Configurações padrão
     VIDEO_EXTENSIONS = ['mp4', 'mkv', 'avi', 'mov', 'flv', 'wmv', 'm4v', 'webm', 'mpg', 'mpeg', 'ts', 'ogv', '3gp']
     MODELO_WHISPER = "small"
     FONTE_PADRAO = "Arial"
-    TAMANHO_PADRAO = 8
+    TAMANHO_PADRAO = 54
     COR_PADRAO = "#DAA520"  # Amarelo mostarda
     POSICAO_VERTICAL_PADRAO = 20  # Porcentagem (0=topo, 100=base)
 
@@ -139,59 +143,56 @@ class LegendadorApp:
         try:
             base_name = os.path.splitext(video_path)[0]
             srt_path = f"{base_name}.srt"
-            
+
             self.log("Transcrevendo áudio...")
             segments = self.transcrever_video(video_path)
-            
+
             self.log("Gerando legendas SRT...")
             self.gerar_srt(segments, srt_path)
-            
-            self.log("Adicionando legendas ao vídeo...")
-            
-            # Configurações de estilo
+
+            self.log("Carregando vídeo com MoviePy...")
+            video = VideoFileClip(video_path)
+            legendas = []
+
             fonte = self.fonte_legenda.get()
             tamanho = self.tamanho_legenda.get()
             cor = self.cor_legenda.get()
             posicao_pct = self.posicao_vertical.get() / 100
-            
-            # Filtro de legenda com posicionamento vertical correto
-            filtro_legenda = (
-                f"subtitles='{srt_path.replace('\\', '/').replace(':', '\\:')}':"
-                f"force_style='FontName={fonte},FontSize={tamanho},"
-                f"PrimaryColour={self.cor_para_ass(cor)},"
-                f"Alignment=2,MarginV={int((1-posicao_pct)*100)},Outline=1,Shadow=0'"
-            )
-            
-            cmd = [
-                'ffmpeg',
-                '-y',
-                '-i', video_path,
-                '-vf', filtro_legenda,
-                '-c:a', 'copy',
-                output_path
-            ]
-            
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
+
+            altura_legenda = int(video.h * posicao_pct)
+
+            self.log("Renderizando legendas no vídeo...")
+
+
+            for seg in segments:
+                texto = seg['text'].strip()
+                if not texto:
+                    continue
+
+                txt_clip = TextClip(
+                    txt=texto,
+                    fontsize=tamanho,
+                    font=fonte,
+                    color=self.cor_legenda.get(),
+                    method='caption',
+                    size=(video.w * 0.9, None),
+                    align='center',
+                    stroke_color='black',  # Contorno para melhor legibilidade
+                    stroke_width=1
+                ).set_position(("center", altura_legenda)).set_duration(seg['end'] - seg['start']).set_start(seg['start'])
+
+                legendas.append(txt_clip)
+
+            video_final = CompositeVideoClip([video] + legendas)
+            video_final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+
             os.remove(srt_path)
             return True
-            
-        except subprocess.CalledProcessError as e:
-            self.log(f"Erro no FFmpeg: {e.stderr.decode('utf-8')}")
-            if os.path.exists(srt_path):
-                try:
-                    os.remove(srt_path)
-                except:
-                    pass
-            return False
+
         except Exception as e:
-            self.log(f"Erro inesperado: {str(e)}")
-            if os.path.exists(srt_path):
-                try:
-                    os.remove(srt_path)
-                except:
-                    pass
+            self.log(f"Erro ao processar vídeo com MoviePy: {e}")
             return False
+
 
     def cor_para_ass(self, cor_hex):
         """Converte cor hex para formato ASS (BGR)"""
@@ -256,6 +257,7 @@ class LegendadorApp:
             "Finalizado", 
             f"Todos os vídeos foram processados e salvos em:\n{output_dir}"
         ))
+
 
 if __name__ == "__main__":
     root = tk.Tk()
