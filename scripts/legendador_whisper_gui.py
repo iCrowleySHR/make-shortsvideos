@@ -44,10 +44,14 @@ class LegendadorApp:
 
         # Linha 1 - Fonte e Tamanho
         tk.Label(config_frame, text="Fonte:", bg="#f0f0f0").grid(row=0, column=0, sticky=tk.W)
-        fontes = list(tkfont.families())
-        fontes.sort()
-        fonte_menu = ttk.Combobox(config_frame, textvariable=self.fonte_legenda, values=fontes, width=15)
+
+        fontes = self.listar_fontes_imagemagick()
+        if not fontes:
+            fontes = [self.FONTE_PADRAO] 
+
+        fonte_menu = ttk.Combobox(config_frame, textvariable=self.fonte_legenda, values=fontes, width=30)
         fonte_menu.grid(row=0, column=1, sticky=tk.W, padx=5)
+
 
         tk.Label(config_frame, text="Tamanho:", bg="#f0f0f0").grid(row=0, column=2, sticky=tk.W)
         ttk.Spinbox(config_frame, from_=10, to=50, textvariable=self.tamanho_legenda, width=5).grid(row=0, column=3, sticky=tk.W, padx=5)
@@ -116,6 +120,27 @@ class LegendadorApp:
         result = model.transcribe(video_path)
         return result["segments"]
 
+    def listar_fontes_imagemagick(self):
+        try:
+            resultado = subprocess.run(
+                ['magick', '-list', 'font'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            saida = resultado.stdout
+            nomes_fontes = []
+            for linha in saida.splitlines():
+                if linha.strip().startswith("Font:"):
+                    partes = linha.split(":", 1)
+                    if len(partes) == 2:
+                        nome_fonte = partes[1].strip()
+                        nomes_fontes.append(nome_fonte)
+            return sorted(nomes_fontes)
+        except Exception as e:
+            self.log(f"Erro ao listar fontes do ImageMagick: {e}")
+            return []
+
     def gerar_srt(self, segments, srt_path):
         legendas = []
 
@@ -137,7 +162,7 @@ class LegendadorApp:
 
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(srt.compose(legendas))
-
+        
 
     def processar_video(self, video_path, output_path):
         try:
@@ -154,7 +179,7 @@ class LegendadorApp:
             video = VideoFileClip(video_path)
             legendas = []
 
-            fonte = self.fonte_legenda.get()
+            fonte_nome = self.fonte_legenda.get()
             tamanho = self.tamanho_legenda.get()
             cor = self.cor_legenda.get()
             posicao_pct = self.posicao_vertical.get() / 100
@@ -162,7 +187,6 @@ class LegendadorApp:
             altura_legenda = int(video.h * posicao_pct)
 
             self.log("Renderizando legendas no vídeo...")
-
 
             for seg in segments:
                 texto = seg['text'].strip()
@@ -172,13 +196,11 @@ class LegendadorApp:
                 txt_clip = TextClip(
                     txt=texto,
                     fontsize=tamanho,
-                    font=fonte,
-                    color=self.cor_legenda.get(),
+                    font=fonte_nome,
+                    color=cor,
                     method='caption',
                     size=(video.w * 0.9, None),
                     align='center',
-                    stroke_color='black',  # Contorno para melhor legibilidade
-                    stroke_width=1
                 ).set_position(("center", altura_legenda)).set_duration(seg['end'] - seg['start']).set_start(seg['start'])
 
                 legendas.append(txt_clip)
@@ -192,7 +214,6 @@ class LegendadorApp:
         except Exception as e:
             self.log(f"Erro ao processar vídeo com MoviePy: {e}")
             return False
-
 
     def cor_para_ass(self, cor_hex):
         """Converte cor hex para formato ASS (BGR)"""
