@@ -4,8 +4,10 @@ import srt
 import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk, colorchooser
+from tkinter import font as tkfont
 import subprocess
 from pathlib import Path
+import threading
 
 class LegendadorApp:
     # Configurações padrão
@@ -15,7 +17,6 @@ class LegendadorApp:
     TAMANHO_PADRAO = 8
     COR_PADRAO = "#DAA520"  # Amarelo mostarda
     POSICAO_VERTICAL_PADRAO = 20  # Porcentagem (0=topo, 100=base)
-    ESPACAMENTO_PADRAO = 0.2  # Fator de espaçamento entre legendas
 
     def __init__(self, root):
         self.root = root
@@ -28,7 +29,6 @@ class LegendadorApp:
         self.tamanho_legenda = tk.IntVar(value=self.TAMANHO_PADRAO)
         self.cor_legenda = tk.StringVar(value=self.COR_PADRAO)
         self.posicao_vertical = tk.IntVar(value=self.POSICAO_VERTICAL_PADRAO)
-        self.espacamento_legenda = tk.DoubleVar(value=self.ESPACAMENTO_PADRAO)
         self.modelo_whisper = tk.StringVar(value=self.MODELO_WHISPER)
 
         self.criar_interface()
@@ -40,7 +40,8 @@ class LegendadorApp:
 
         # Linha 1 - Fonte e Tamanho
         tk.Label(config_frame, text="Fonte:", bg="#f0f0f0").grid(row=0, column=0, sticky=tk.W)
-        fontes = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana']
+        fontes = list(tkfont.families())
+        fontes.sort()
         fonte_menu = ttk.Combobox(config_frame, textvariable=self.fonte_legenda, values=fontes, width=15)
         fonte_menu.grid(row=0, column=1, sticky=tk.W, padx=5)
 
@@ -52,14 +53,11 @@ class LegendadorApp:
         cor_btn.grid(row=0, column=5, sticky=tk.W, padx=5)
         self.cor_btn = cor_btn
 
-        # Linha 2 - Posição e Espaçamento
+        # Linha 2 - Posição e Modelo
         tk.Label(config_frame, text="Posição Vertical (%):", bg="#f0f0f0").grid(row=1, column=0, sticky=tk.W)
         ttk.Scale(config_frame, from_=0, to=100, variable=self.posicao_vertical, command=self.atualizar_posicao).grid(row=1, column=1, sticky=tk.W, padx=5)
         self.posicao_label = tk.Label(config_frame, text=f"{self.POSICAO_VERTICAL_PADRAO}%", bg="#f0f0f0")
         self.posicao_label.grid(row=1, column=2, sticky=tk.W)
-
-        tk.Label(config_frame, text="Espaçamento:", bg="#f0f0f0").grid(row=1, column=3, sticky=tk.W)
-        ttk.Spinbox(config_frame, from_=0.1, to=2, increment=0.1, textvariable=self.espacamento_legenda, width=5).grid(row=1, column=4, sticky=tk.W, padx=5)
 
         tk.Label(config_frame, text="Modelo Whisper:", bg="#f0f0f0").grid(row=1, column=5, sticky=tk.W)
         modelos = ['tiny', 'base', 'small', 'medium', 'large']
@@ -116,21 +114,15 @@ class LegendadorApp:
 
     def gerar_srt(self, segments, srt_path):
         legendas = []
-        espacamento = self.espacamento_legenda.get()
-        
+
         for i, seg in enumerate(segments):
             start = seg['start']
             end = seg['end']
-            
-            if i > 0:
-                tempo_anterior = legendas[-1].end.total_seconds()
-                diferenca = start - tempo_anterior
-                start = tempo_anterior + (diferenca * espacamento)
-            
+
             start_time = datetime.timedelta(seconds=start)
             end_time = datetime.timedelta(seconds=end)
             texto = ' '.join(seg['text'].strip().split())
-            
+
             legenda = srt.Subtitle(
                 index=i+1,
                 start=start_time,
@@ -138,9 +130,10 @@ class LegendadorApp:
                 content=texto
             )
             legendas.append(legenda)
-        
+
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(srt.compose(legendas))
+
 
     def processar_video(self, video_path, output_path):
         try:
@@ -214,6 +207,10 @@ class LegendadorApp:
         if not pasta:
             return
         
+        thread = threading.Thread(target=self.processar_pasta, args=(pasta,), daemon=True)
+        thread.start()
+
+    def processar_pasta(self, pasta):
         self.log(f"Pasta selecionada: {pasta}")
         
         output_dir = os.path.join(pasta, "legendados")
@@ -226,13 +223,15 @@ class LegendadorApp:
         for f in os.listdir(pasta):
             file_path = os.path.join(pasta, f)
             if os.path.isfile(file_path):
-                ext = Path(f).suffix[1:].lower()  # Remove o ponto e converte para minúsculas
+                ext = Path(f).suffix[1:].lower()
                 if ext in self.VIDEO_EXTENSIONS:
                     videos.append(f)
         
         if not videos:
-            messagebox.showwarning("Aviso", 
-                f"Nenhum vídeo encontrado na pasta. Formatos suportados: {', '.join(self.VIDEO_EXTENSIONS)}")
+            self.root.after(0, lambda: messagebox.showwarning(
+                "Aviso", 
+                f"Nenhum vídeo encontrado na pasta. Formatos suportados: {', '.join(self.VIDEO_EXTENSIONS)}"
+            ))
             return
         
         self.log(f"Encontrados {len(videos)} vídeos para processar.")
@@ -253,7 +252,10 @@ class LegendadorApp:
                 self.log(f"Falha ao processar: {video}")
         
         self.log("\nProcessamento concluído!")
-        messagebox.showinfo("Finalizado", f"Todos os vídeos foram processados e salvos em:\n{output_dir}")
+        self.root.after(0, lambda: messagebox.showinfo(
+            "Finalizado", 
+            f"Todos os vídeos foram processados e salvos em:\n{output_dir}"
+        ))
 
 if __name__ == "__main__":
     root = tk.Tk()
