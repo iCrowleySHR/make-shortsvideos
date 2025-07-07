@@ -163,7 +163,6 @@ class LegendadorApp:
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(srt.compose(legendas))
         
-
     def processar_video(self, video_path, output_path):
         try:
             base_name = os.path.splitext(video_path)[0]
@@ -180,8 +179,10 @@ class LegendadorApp:
             legendas = []
 
             fonte_nome = self.fonte_legenda.get()
-            tamanho = self.tamanho_legenda.get()
+            tamanho = int(self.tamanho_legenda.get())
             cor = self.cor_legenda.get()
+            cor_contorno = "black"  # Cor do contorno
+            espessura_contorno = 5   # Espessura do contorno
             posicao_pct = self.posicao_vertical.get() / 100
 
             altura_legenda = int(video.h * posicao_pct)
@@ -193,17 +194,34 @@ class LegendadorApp:
                 if not texto:
                     continue
 
-                txt_clip = TextClip(
-                    txt=texto,
-                    fontsize=tamanho,
-                    font=fonte_nome,
-                    color=cor,
-                    method='caption',
-                    size=(video.w * 0.9, None),
-                    align='center',
+                # Configurações comuns para contorno e texto principal
+                text_kwargs = {
+                    'txt': texto,
+                    'fontsize': tamanho,
+                    'font': fonte_nome,
+                    'method': 'caption',  # Ou 'pango' se disponível
+                    'size': (video.w * 0.9, None),  # Largura fixa, altura automática
+                    'align': 'center',
+                    'print_cmd': True  # Debug (opcional)
+                }
+
+                # Camada de contorno (stroke externo)
+                contorno = TextClip(
+                    **text_kwargs,
+                    color=cor_contorno,
+                    stroke_color=cor_contorno,
+                    stroke_width=espessura_contorno * 2,  # Stroke mais largo
                 ).set_position(("center", altura_legenda)).set_duration(seg['end'] - seg['start']).set_start(seg['start'])
 
-                legendas.append(txt_clip)
+                # Camada de texto principal (sem stroke)
+                texto_principal = TextClip(
+                    **text_kwargs,
+                    color=cor,
+                    stroke_width=0,  # Sem contorno
+                ).set_position(("center", altura_legenda)).set_duration(seg['end'] - seg['start']).set_start(seg['start'])
+
+                # Adiciona ambas as camadas (contorno primeiro)
+                legendas.extend([contorno, texto_principal])
 
             video_final = CompositeVideoClip([video] + legendas)
             video_final.write_videofile(output_path, codec="libx264", audio_codec="aac")
