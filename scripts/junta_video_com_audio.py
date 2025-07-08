@@ -58,7 +58,12 @@ class ShortsMakerSimples:
         resolution_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(resolution_frame, text="Resolução de saída:").pack(side=tk.LEFT, padx=5)
-        self.resolution_combo = ttk.Combobox(resolution_frame, state="readonly", values=["720x1280", "1080x1920"], width=15)
+        self.resolution_combo = ttk.Combobox(
+            resolution_frame,
+            state="readonly",
+            values=["720x1280", "1080x1920", "1280x720", "1920x1080"],
+            width=15
+        )
         self.resolution_combo.pack(side=tk.LEFT, padx=5)
         self.resolution_combo.set("1080x1920")
         self.resolution_combo.bind("<<ComboboxSelected>>", self.on_resolution_change)
@@ -87,10 +92,8 @@ class ShortsMakerSimples:
 
     def on_resolution_change(self, event=None):
         selected = self.resolution_combo.get()
-        if selected == "720x1280":
-            self.output_resolution = (720, 1280)
-        elif selected == "1080x1920":
-            self.output_resolution = (1080, 1920)
+        w, h = map(int, selected.split("x"))
+        self.output_resolution = (w, h)
 
     def log(self, message):
         self.log_area.insert(tk.END, message + "\n")
@@ -166,7 +169,13 @@ class ShortsMakerSimples:
                     self.log(f"⏭️ Pulado (já existe): {output_name}")
                     continue
 
-                vf_filter = f"scale=-2:{target_h},crop='if(gt(iw,{target_w}),{target_w},iw)':{target_h}"
+                # Filtro adaptável para vertical/horizontal
+                if target_h > target_w:
+                    # Portrait
+                    vf_filter = f"scale=-2:{target_h},crop='if(gt(iw,{target_w}),{target_w},iw)':{target_h}"
+                else:
+                    # Landscape
+                    vf_filter = f"scale=-2:{target_h},crop={target_w}:{target_h}"
 
                 cmd = [
                     "ffmpeg",
