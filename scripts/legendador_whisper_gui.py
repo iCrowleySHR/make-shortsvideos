@@ -86,6 +86,17 @@ class LegendadorApp:
             pady=10
         ).pack()
 
+        tk.Button(
+            btn_frame, 
+            text="Selecionar Vídeo Único", 
+            command=self.selecionar_video,
+            font=("Arial", 12),
+            bg="#2196F3",
+            fg="white",
+            padx=20,
+            pady=10
+        ).pack(pady=5)
+
         # Área de log
         log_frame = tk.LabelFrame(self.root, text="Log de Processamento", bg="#f0f0f0")
         log_frame.pack(pady=5, padx=10, fill=tk.BOTH, expand=True)
@@ -249,6 +260,37 @@ class LegendadorApp:
         
         thread = threading.Thread(target=self.processar_pasta, args=(pasta,), daemon=True)
         thread.start()
+    
+    def selecionar_video(self):
+        caminho_video = filedialog.askopenfilename(
+            filetypes=[("Vídeos", "*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.m4v *.webm *.mpg *.mpeg *.ts *.ogv *.3gp")]
+        )
+        if not caminho_video:
+            return
+
+        pasta_origem = os.path.dirname(caminho_video)
+        nome_arquivo = Path(caminho_video).stem
+        extensao = Path(caminho_video).suffix
+
+        output_dir = os.path.join(pasta_origem, "legendados")
+        os.makedirs(output_dir, exist_ok=True)
+
+        output_path = os.path.join(output_dir, f"{nome_arquivo}_legendado{extensao}")
+
+        self.log(f"\nProcessando vídeo único: {nome_arquivo + extensao}")
+        thread = threading.Thread(target=self.processar_unico, args=(caminho_video, output_path), daemon=True)
+        thread.start()
+
+    def processar_unico(self, video_path, output_path):
+        if os.path.exists(output_path):
+            self.log("Versão legendada já existe. Pulando.")
+        else:
+            if self.processar_video(video_path, output_path):
+                self.log(f"Concluído: {os.path.basename(video_path)}")
+                self.root.after(0, lambda: messagebox.showinfo("Finalizado", "Vídeo legendado com sucesso!"))
+            else:
+                self.log(f"Erro ao processar: {os.path.basename(video_path)}")
+
 
     def processar_pasta(self, pasta):
         self.log(f"Pasta selecionada: {pasta}")
